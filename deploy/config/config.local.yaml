@@ -1,0 +1,70 @@
+# Local dev variant of config.yaml: talks to Redis on localhost instead
+# of the "redis" docker-compose service hostname, and disables auth so
+# you can curl the service directly. Run: go run ./cmd/server -config
+# deploy/config/config.local.yaml (with `redis-server` running locally).
+
+server:
+  grpc_addr: ":9090"
+  http_addr: ":8080"
+  admin_addr: ":8081"
+  metrics_addr: ":9100"
+
+redis:
+  addrs:
+    - "127.0.0.1:6379"
+  cluster_mode: false
+  dial_timeout: 500ms
+  read_timeout: 200ms
+  write_timeout: 200ms
+
+# Per-gateway API keys (NFR5). Empty here to disable auth for local dev.
+auth:
+  api_keys: {}
+
+rules:
+  # FR5: brute-force login protection, composite IP+username key,
+  # progressive lockout escalating 1min -> 5min -> 30min.
+  - id: login-brute-force
+    description: "Lock out IP+username combos after repeated failed logins"
+    algorithm: sliding_window
+    key_parts: ["ip", "username"]
+    namespace: default
+    fail_mode: fail_closed
+    windows:
+      - limit: 5
+        period: 1m
+    lockout:
+      enabled: true
+      violation_ttl: 1h
+      steps:
+        - after_violations: 1
+          lockout: 1m
+        - after_violations: 3
+          lockout: 5m
+        - after_violations: 6
+          lockout: 30m
+
+  # FR3: IP-only limiter for anonymous traffic, FR4: GCRA to smooth bursts.
+  - id: anonymous-ip-limit
+    description: "Smooth per-IP request rate for unauthenticated traffic"
+    algorithm: gcra
+    key_parts: ["ip"]
+    namespace: default
+    fail_mode: fail_open
+    burst: 20
+    windows:
+      - limit: 100
+        period: 1m
+
+  # FR2: two windows on the same key (per-minute burst + per-hour quota).
+  - id: account-api-quota
+    description: "Per-account API quota: short burst window + hourly ceiling"
+    algorithm: sliding_window
+    key_parts: ["username"]
+    namespace: default
+    fail_mode: fail_closed
+    windows:
+      - limit: 60
+        period: 1m
+      - limit: 1000
+        period: 1h

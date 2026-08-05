@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Register with: apigee TargetServer create, or via management API, in
+  each environment. Points SC-Unigate-CheckLimit at the Unigate
+  service's HTTP listener (config.yaml server.http_addr).
+-->
+<TargetServer name="unigate-ratelimit">
+    <Host>unigate.internal</Host>
+    <Port>8080</Port>
+    <IsEnabled>true</IsEnabled>
+    <Protocol>HTTP</Protocol>
+</TargetServer>

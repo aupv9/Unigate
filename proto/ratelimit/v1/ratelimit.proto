@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package ratelimit.v1;
+
+option go_package = "github.com/aupv9/unigate/gen/go/ratelimit/v1;ratelimitv1";
+
+// RateLimitService is the "rate-limit brain" that every gateway adapter
+// (Kong, APISIX, Apigee) calls into to decide whether a request is allowed.
+service RateLimitService {
+  // CheckLimit evaluates one or more rate-limit rules for the given key and
+  // reports whether the request should be allowed, plus enough information
+  // for the caller to populate standard X-RateLimit-* / Retry-After headers.
+  rpc CheckLimit(CheckLimitRequest) returns (CheckLimitResponse);
+
+  // Reset clears counters/lockout state for a key (operational/testing use).
+  rpc Reset(ResetRequest) returns (ResetResponse);
+}
+
+// AdminService lets the security team manage rule definitions without
+// redeploying any gateway (FR8).
+service AdminService {
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
+  rpc GetRule(GetRuleRequest) returns (Rule);
+  rpc CreateRule(CreateRuleRequest) returns (Rule);
+  rpc UpdateRule(UpdateRuleRequest) returns (Rule);
+  rpc DeleteRule(DeleteRuleRequest) returns (DeleteRuleResponse);
+}
+
+enum Algorithm {
+  ALGORITHM_UNSPECIFIED = 0;
+  ALGORITHM_SLIDING_WINDOW = 1;
+  ALGORITHM_GCRA = 2;
+}
+
+enum FailMode {
+  FAIL_MODE_UNSPECIFIED = 0;
+  FAIL_OPEN = 1;
+  FAIL_CLOSED = 2;
+}
+
+// KeyComponent identifies one piece of a composite rate-limit key
+// (FR3: IP-only, username-only, or IP+username combined).
+message KeyComponent {
+  string kind = 1;  // e.g. "ip", "username", "api_key", "consumer"
+  string value = 2;
+}
+
+// A single time-windowed threshold within a rule (FR2: multiple
+// windows on the same key, e.g. 5 req/min AND 100 req/hour).
+message Window {
+  int64 limit = 1;             // max requests allowed in this window
+  int64 period_seconds = 2;    // window length in seconds
+}
+
+message LockoutStep {
+  int32 after_violations = 1;  // consecutive violations that trigger this step
+  int64 lockout_seconds = 2;   // lockout duration applied at this step
+}
+
+message LockoutPolicy {
+  bool enabled = 1;
+  repeated LockoutStep steps = 2;    // ordered, ascending by after_violations
+  int64 violation_ttl_seconds = 3;   // how long a violation stays "consecutive"
+}
+
+message Rule {
+  string id = 1;
+  string description = 2;
+  Algorithm algorithm = 3;
+  repeated Window windows = 4;
+  LockoutPolicy lockout = 5;
+  FailMode fail_mode = 6;
+  string namespace = 7;   // environment/gateway namespace (NFR7)
+  int64 burst = 8;        // GCRA burst allowance (ignored for sliding window)
+  repeated string key_parts = 9; // composite key definition, e.g. ["ip","username"] (FR3)
+}
+
+message CheckLimitRequest {
+  string rule_id = 1;
+  repeated KeyComponent key = 2;
+  int64 cost = 3;          // request weight, defaults to 1 if 0
+  string gateway = 4;      // "kong" | "apisix" | "apigee" | ... (for audit/metrics)
+  string namespace = 5;    // overrides rule's namespace if set
+}
+
+message CheckLimitResponse {
+  bool allow = 1;
+  int64 limit = 2;
+  int64 remaining = 3;
+  int64 reset_seconds = 4;      // seconds until the window/bucket resets
+  int64 retry_after_seconds = 5; // set when allow=false
+  bool locked_out = 6;
+  int64 lockout_remaining_seconds = 7;
+  string matched_window = 8;    // which window (if any) caused the block
+}
+
+message ResetRequest {
+  string rule_id = 1;
+  repeated KeyComponent key = 2;
+  string namespace = 3;
+}
+
+message ResetResponse {
+  bool ok = 1;
+}
+
+message ListRulesRequest {
+  string namespace = 1;
+}
+
+message ListRulesResponse {
+  repeated Rule rules = 1;
+}
+
+message GetRuleRequest {
+  string id = 1;
+}
+
+message CreateRuleRequest {
+  Rule rule = 1;
+}
+
+message UpdateRuleRequest {
+  Rule rule = 1;
+}
+
+message DeleteRuleRequest {
+  string id = 1;
+}
+
+message DeleteRuleResponse {
+  bool ok = 1;
+}

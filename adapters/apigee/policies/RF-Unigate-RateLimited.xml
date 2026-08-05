@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Terminates the request with a 429 (or 503 if Unigate itself was
+  unreachable and fail_open=false) plus standardized rate-limit
+  headers (FR7). Wire this step with condition: unigate.blocked = true
+-->
+<RaiseFault async="false" continueOnError="false" enabled="true"
+            name="RF-Unigate-RateLimited">
+    <DisplayName>RF Unigate Rate Limited</DisplayName>
+    <FaultResponse>
+        <Set>
+            <StatusCode>{unigate.status_code}</StatusCode>
+            <ReasonPhrase>Too Many Requests</ReasonPhrase>
+            <Headers>
+                <Header name="Retry-After">{unigate.header.retry_after}</Header>
+                <Header name="X-RateLimit-Limit">{unigate.header.limit}</Header>
+                <Header name="X-RateLimit-Remaining">{unigate.header.remaining}</Header>
+                <Header name="X-RateLimit-Reset">{unigate.header.reset}</Header>
+            </Headers>
+            <Payload contentType="application/json">{ "error": "{unigate.message}" }</Payload>
+        </Set>
+    </FaultResponse>
+    <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</RaiseFault>

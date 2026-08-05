@@ -1,0 +1,30 @@
+version: "3.8"
+
+# Local dev environment for the Universal Rate Limiting Service:
+# a single Redis node (NFR3 calls for a real Redis Cluster in prod)
+# plus the service itself.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  unigate:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080" # CheckLimit HTTP
+      - "8081:8081" # Admin HTTP
+      - "9090:9090" # gRPC
+      - "9100:9100" # Prometheus metrics
+    volumes:
+      - ../config/config.yaml:/etc/unigate/config.yaml:ro

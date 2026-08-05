@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example wiring for a ProxyEndpoint (or a reusable SharedFlow attached
+  via FlowCallout). Set unigate.rule_id / unigate.key_parts /
+  unigate.fail_open beforehand (e.g. in an AssignMessage step per API
+  product, omitted here for brevity).
+
+  IMPORTANT: the CheckLimit call + block decision must run in the
+  Request PreFlow (before the target is called), but AM-Unigate-
+  SetHeaders must run in the Response PostFlow: Apigee's "response"
+  message object doesn't exist yet during request processing, so an
+  AssignMessage with type="response" is a no-op if run too early. The
+  unigate.header.* flow variables set during the request phase remain
+  readable in the response phase, so this split is safe.
+-->
+<ProxyEndpoint name="example">
+    <PreFlow name="PreFlow">
+        <Request>
+            <Step>
+                <Name>JS-Unigate-BuildRequest</Name>
+            </Step>
+            <Step>
+                <Name>AM-Unigate-Request</Name>
+            </Step>
+            <Step>
+                <Name>SC-Unigate-CheckLimit</Name>
+            </Step>
+            <Step>
+                <Name>JS-Unigate-EnforceDecision</Name>
+            </Step>
+            <Step>
+                <Condition>unigate.blocked = true</Condition>
+                <Name>RF-Unigate-RateLimited</Name>
+            </Step>
+        </Request>
+    </PreFlow>
+    <PostFlow name="PostFlow">
+        <Response>
+            <Step>
+                <Condition>unigate.blocked = false</Condition>
+                <Name>AM-Unigate-SetHeaders</Name>
+            </Step>
+        </Response>
+    </PostFlow>
+</ProxyEndpoint>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Calls the Unigate CheckLimit HTTP endpoint (FR1, FR6). Apigee doesn't
+  allow arbitrary compiled plugin code, so ServiceCallout + JavaScript
+  is the supported integration path (see docs/PRD.md section 8).
+
+  Point the TargetServer at the Unigate service's HTTP listener
+  (config.yaml server.http_addr). A short timeout keeps p99 added
+  latency low (NFR1); tune per environment.
+-->
+<ServiceCallout async="false" continueOnError="false" enabled="true"
+                name="SC-Unigate-CheckLimit">
+    <DisplayName>SC Unigate CheckLimit</DisplayName>
+    <Request variable="unigateRequest"/>
+    <Response>unigate.response</Response>
+    <Timeout>50</Timeout>
+    <HTTPTargetConnection>
+        <Path>/v1/check</Path>
+        <LoadBalancer>
+            <Server name="unigate-ratelimit"/>
+        </LoadBalancer>
+    </HTTPTargetConnection>
+</ServiceCallout>
