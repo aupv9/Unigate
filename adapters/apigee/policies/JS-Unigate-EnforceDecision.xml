@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Javascript async="false" continueOnError="false" enabled="true" timeLimit="200"
+            name="JS-Unigate-EnforceDecision">
+    <DisplayName>JS Unigate Enforce Decision</DisplayName>
+    <Properties/>
+    <ResourceURL>jsc://unigate-enforce.js</ResourceURL>
+</Javascript>

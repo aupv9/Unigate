@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Forwards the standardized rate-limit headers (FR7) on the ALLOWED
+  path. The blocked path sets its own copy of these headers directly
+  in RF-Unigate-RateLimited's FaultResponse, since RaiseFault replaces
+  the response rather than layering on top of it.
+
+  Wire this step with condition: unigate.blocked = false
+-->
+<AssignMessage async="false" continueOnError="true" enabled="true"
+               name="AM-Unigate-SetHeaders">
+    <DisplayName>AM Unigate Set Headers</DisplayName>
+    <AssignTo createNew="false" transport="http" type="response"/>
+    <Set>
+        <Headers>
+            <Header name="X-RateLimit-Limit">{unigate.header.limit}</Header>
+            <Header name="X-RateLimit-Remaining">{unigate.header.remaining}</Header>
+            <Header name="X-RateLimit-Reset">{unigate.header.reset}</Header>
+        </Headers>
+    </Set>
+    <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>

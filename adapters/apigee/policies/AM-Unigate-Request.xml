@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Builds the outbound HTTP message ServiceCallout will send, from the
+  JSON body JS-Unigate-BuildRequest assembled into unigate.request.body.
+
+  The API key (NFR5) should be sourced from an Apigee KVM or Vault entry
+  in a real deployment, not hardcoded; {unigate.api_key} here is assumed
+  to be populated by an earlier policy (e.g. KeyValueMapOperations).
+-->
+<AssignMessage async="false" continueOnError="false" enabled="true"
+               name="AM-Unigate-Request">
+    <DisplayName>AM Unigate Request</DisplayName>
+    <AssignTo createNew="true" transport="http" type="request">unigateRequest</AssignTo>
+    <Set>
+        <Verb>POST</Verb>
+        <Payload contentType="application/json">{unigate.request.body}</Payload>
+        <Headers>
+            <Header name="Content-Type">application/json</Header>
+            <Header name="X-Unigate-Api-Key">{unigate.api_key}</Header>
+            <Header name="X-Unigate-Gateway">apigee</Header>
+        </Headers>
+    </Set>
+    <IgnoreUnresolvedVariables>true</IgnoreUnresolvedVariables>
+</AssignMessage>
