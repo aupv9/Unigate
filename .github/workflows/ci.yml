@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt check
+        run: |
+          diff <(gofmt -l .) <(echo -n "")
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        # internal/store and internal/ruleengine also spin up their own
+        # ephemeral redis-server for isolation; the service container
+        # above covers any test that just needs a reachable Redis.
+        run: go test ./... -v -count=1
+
+  proto-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc-gen-go / protoc-gen-go-grpc
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Regenerate and diff
+        run: |
+          protoc -I proto \
+            --go_out=gen/go --go_opt=paths=source_relative \
+            --go-grpc_out=gen/go --go-grpc_opt=paths=source_relative \
+            proto/ratelimit/v1/ratelimit.proto
+          git diff --exit-code gen/go
+
+  lua-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - name: Check adapter Lua syntax
+        run: |
+          find adapters -name '*.lua' -print0 | xargs -0 -n1 luac -p
+
+  apigee-policy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xmllint / node
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+      - name: Validate policy XML
+        run: |
+          find adapters/apigee -name '*.xml' -print0 | xargs -0 -n1 xmllint --noout
+      - name: Validate resource JS syntax
+        run: |
+          find adapters/apigee -name '*.js' -print0 | xargs -0 -n1 node --check

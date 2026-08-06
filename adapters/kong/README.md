@@ -37,3 +37,8 @@ Custom Kong plugin (FR6) that calls the Unigate rate-limit service's
    ```
 
 3. Reload/restart Kong. Verify with `kong config parse` before rollout.
+
+See `deploy/docker/e2e/kong.yaml` for a complete working declarative
+config, and `deploy/docker/docker-compose.e2e.yaml` +
+`scripts/e2e-smoke-test.sh` for a runnable end-to-end test against a
+real Kong container.

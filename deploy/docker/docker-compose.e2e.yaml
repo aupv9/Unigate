@@ -1,0 +1,79 @@
+# End-to-end smoke test stack: real Kong + APISIX in front of Unigate,
+# proving the same rule blocks identically through both gateways
+# (PRD section 9 acceptance criteria). Run with:
+#
+#   docker compose -f deploy/docker/docker-compose.e2e.yaml up -d --build
+#   ./scripts/e2e-smoke-test.sh
+#   docker compose -f deploy/docker/docker-compose.e2e.yaml down -v
+#
+# This is a separate, self-contained stack from docker-compose.yaml
+# (which is just for local dev against the service directly) - it
+# uses config.e2e.yaml, whose "smoke-ip-limit" rule has a short
+# window/lockout so the test finishes in seconds.
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  unigate:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../config/config.e2e.yaml:/etc/unigate/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    ports:
+      # Published so the smoke test can call POST /v1/reset directly
+      # between the Kong and APISIX sub-tests (both gateways share the
+      # same Unigate instance/Redis, so without a reset the second
+      # gateway would inherit the first gateway's counter state - which
+      # is by design, since the whole point is a shared rate-limit
+      # brain, but makes "test each gateway in isolation" need an
+      # explicit reset).
+      - "18080:8080"
+
+  backend:
+    image: nginx:alpine
+    # Any 200 response works: the smoke test only cares about the
+    # gateway+plugin's allow/block decision, not the upstream response.
+
+  kong:
+    image: kong:3.7
+    depends_on:
+      unigate:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yaml
+      KONG_PLUGINS: bundled,unigate-ratelimit
+      KONG_LUA_PACKAGE_PATH: /kong/plugins/?.lua;/kong/plugins/?/init.lua;;
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    volumes:
+      - ./e2e/kong.yaml:/kong/declarative/kong.yaml:ro
+      - ../../adapters/kong/kong/plugins:/kong/plugins:ro
+    ports:
+      - "8000:8000"
+
+  apisix:
+    image: apache/apisix:3.9.1-debian
+    depends_on:
+      unigate:
+        condition: service_healthy
+    volumes:
+      - ./e2e/apisix-config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./e2e/apisix-routes.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+      - ../../adapters/apisix/apisix/plugins/unigate-ratelimit.lua:/usr/local/apisix/apisix/plugins/unigate-ratelimit.lua:ro
+    ports:
+      - "9080:9080"
