@@ -1,0 +1,19 @@
+# APISIX main config for the e2e smoke test: standalone/no-etcd mode,
+# routes loaded from apisix-routes.yaml (config_provider: yaml).
+#
+# NOTE: APISIX deep-merges config.yaml onto its built-in
+# config-default.yaml, and specifically APPENDS the `plugins` list
+# here onto the default plugin set rather than replacing it - so
+# listing only our custom plugin (instead of the whole default list)
+# is intentional, not an oversight. Verify this against your installed
+# APISIX version before relying on it in a real deployment.
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+apisix:
+  node_listen: 9080
+
+plugins:
+  - unigate-ratelimit

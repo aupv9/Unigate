@@ -29,3 +29,9 @@ headers on allow — FR7).
    ```
 
 4. Reload APISIX (`apisix reload`).
+
+See `deploy/docker/e2e/apisix-config.yaml` +
+`deploy/docker/e2e/apisix-routes.yaml` for a complete working
+standalone (no-etcd) config, and `deploy/docker/docker-compose.e2e.yaml`
++ `scripts/e2e-smoke-test.sh` for a runnable end-to-end test against a
+real APISIX container.

@@ -1,0 +1,18 @@
+routes:
+  - id: protected
+    uri: /protected
+    upstream:
+      type: roundrobin
+      nodes:
+        "backend:80": 1
+    plugins:
+      unigate-ratelimit:
+        service_url: "http://unigate:8080/v1/check"
+        rule_id: "smoke-ip-limit"
+        namespace: "e2e"
+        gateway_name: "apisix"
+        key_parts:
+          - "ip"
+        fail_open: false
+        timeout_ms: 200
+#END

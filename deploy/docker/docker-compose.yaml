@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Local dev environment for the Universal Rate Limiting Service:
 # a single Redis node (NFR3 calls for a real Redis Cluster in prod)
 # plus the service itself.

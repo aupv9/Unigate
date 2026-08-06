@@ -1,0 +1,38 @@
+# Config used only by the Kong/APISIX end-to-end smoke test
+# (deploy/docker/docker-compose.e2e.yaml + scripts/e2e-smoke-test.sh).
+#
+# Uses a short window/lockout so the smoke test finishes in seconds
+# instead of the 1m/5m/30m escalation in the production example
+# (deploy/config/config.yaml).
+
+server:
+  grpc_addr: ":9090"
+  http_addr: ":8080"
+  admin_addr: ":8081"
+  metrics_addr: ":9100"
+
+redis:
+  addrs:
+    - "redis:6379"
+
+auth:
+  api_keys: {}
+
+rules:
+  - id: smoke-ip-limit
+    description: "Fast IP-only limiter for the Kong/APISIX e2e smoke test"
+    algorithm: sliding_window
+    key_parts: ["ip"]
+    namespace: e2e
+    fail_mode: fail_closed
+    windows:
+      - limit: 3
+        period: 10s
+    lockout:
+      enabled: true
+      violation_ttl: 60s
+      steps:
+        - after_violations: 1
+          lockout: 5s
+        - after_violations: 2
+          lockout: 15s

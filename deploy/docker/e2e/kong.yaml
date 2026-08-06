@@ -1,0 +1,25 @@
+_format_version: "3.0"
+
+# DB-less declarative config for the Kong side of the e2e smoke test
+# (scripts/e2e-smoke-test.sh). Routes /protected through a plain nginx
+# backend, gated by the unigate-ratelimit plugin against the
+# "smoke-ip-limit" rule in deploy/config/config.e2e.yaml.
+services:
+  - name: backend
+    url: http://backend:80
+    routes:
+      - name: protected
+        paths:
+          - /protected
+        strip_path: false
+    plugins:
+      - name: unigate-ratelimit
+        config:
+          service_url: http://unigate:8080/v1/check
+          rule_id: smoke-ip-limit
+          namespace: e2e
+          gateway_name: kong
+          key_parts:
+            - ip
+          fail_open: false
+          timeout_ms: 200

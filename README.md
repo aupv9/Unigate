@@ -86,6 +86,43 @@ make test   # spins up an ephemeral redis-server per test package
 make vet
 ```
 
+Every layer has coverage: `internal/config`, `internal/store` (sliding
+window / GCRA / lockout, atomicity), `internal/ruleengine` (fail-open/
+closed, lockout escalation), and the API surface gateways actually call
+(`internal/api/httpserver`, `internal/api/grpcserver`,
+`internal/api/adminserver`, `internal/api/authmw`).
+
+CI (`.github/workflows/ci.yml`) runs `go build`/`go vet`/`gofmt`/
+`go test` on every PR, plus a proto-regen diff check and Lua/JS/XML
+syntax checks on the adapter code.
+
+### End-to-end smoke test (real Kong + APISIX)
+
+`deploy/docker/docker-compose.e2e.yaml` brings up Redis, Unigate, a
+plain nginx backend, and **real** Kong + APISIX containers with the
+adapters from `adapters/kong` and `adapters/apisix` mounted in, both
+routing `/protected` through the `smoke-ip-limit` rule
+(`deploy/config/config.e2e.yaml` — same rule engine, short window so
+the test finishes in seconds). `scripts/e2e-smoke-test.sh` then proves
+the two gateways enforce that one shared rule identically: it spends
+the request budget across both gateways, and confirms a request
+blocked via one gateway is *also* blocked via the other — i.e. the
+centralized "brain" is really shared, not per-gateway.
+
+```sh
+docker compose -f deploy/docker/docker-compose.e2e.yaml up -d --build
+./scripts/e2e-smoke-test.sh
+docker compose -f deploy/docker/docker-compose.e2e.yaml down -v
+```
+
+**Not yet run in this repo's dev environment** (no Docker daemon
+available there) — the compose files and script are syntax-validated
+(`docker compose config`, `shellcheck`, and a parsing dry-run against a
+local test server) but need a real run in an environment with Docker
+before being trusted as a release gate. Apigee isn't covered here since
+it has no local-container story; validate that adapter against a real
+Apigee sandbox separately.
+
 ## Regenerating protobuf code
 
 ```sh
