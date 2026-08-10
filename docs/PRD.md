@@ -153,7 +153,8 @@ staged) plus a first cut of Phase 2-4 items:
 | FR9 (audit log/metrics) | `internal/audit`, `internal/metrics` |
 | FR10 (fail-open/closed) | `internal/ruleengine/engine.go` (per-rule `fail_mode`) |
 | NFR4 (atomic ops) | Redis Lua scripts in `internal/store/*.lua` |
-| NFR5 (adapter auth) | `internal/api/authmw` |
+| NFR5 (adapter auth) | `internal/api/authmw`; secrets kept out of config via `internal/config/envexpand.go` (`${VAR}`/`${VAR:-default}`) + `.env.example` |
 | NFR7 (namespacing) | `config.RuleConfig.Namespace`, `internal/store` key hashing |
+| (docs) HTTP API reference | `api/openapi.yaml`, linted in CI |
 
 See the top-level `README.md` for how to run and test this locally.

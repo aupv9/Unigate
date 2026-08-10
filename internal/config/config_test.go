@@ -83,3 +83,55 @@ rules:
 		t.Fatalf("expected error for invalid duration")
 	}
 }
+
+func TestLoad_ExpandsEnvVarsForSecrets(t *testing.T) {
+	t.Setenv("TEST_KONG_API_KEY", "s3cr3t-from-env")
+	t.Setenv("TEST_REDIS_PASSWORD", "redis-pw")
+
+	path := writeTempConfig(t, `
+redis:
+  addrs: ["localhost:6379"]
+  password: "${TEST_REDIS_PASSWORD}"
+auth:
+  api_keys:
+    kong: "${TEST_KONG_API_KEY}"
+    apisix: "${TEST_APISIX_API_KEY:-fallback-default}"
+rules:
+  - id: r1
+    key_parts: ["ip"]
+    windows: [{limit: 1, period: 1m}]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Redis.Password != "redis-pw" {
+		t.Errorf("expected redis password from env, got %q", cfg.Redis.Password)
+	}
+	if cfg.Auth.APIKeys["kong"] != "s3cr3t-from-env" {
+		t.Errorf("expected kong api key from env, got %q", cfg.Auth.APIKeys["kong"])
+	}
+	if cfg.Auth.APIKeys["apisix"] != "fallback-default" {
+		t.Errorf("expected apisix api key to fall back to default, got %q", cfg.Auth.APIKeys["apisix"])
+	}
+}
+
+func TestLoad_UnsetEnvVarWithNoDefaultExpandsEmpty(t *testing.T) {
+	os.Unsetenv("TEST_TOTALLY_UNSET_VAR")
+	path := writeTempConfig(t, `
+auth:
+  api_keys:
+    kong: "${TEST_TOTALLY_UNSET_VAR}"
+rules:
+  - id: r1
+    key_parts: ["ip"]
+    windows: [{limit: 1, period: 1m}]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Auth.APIKeys["kong"] != "" {
+		t.Errorf("expected empty string for unset var with no default, got %q", cfg.Auth.APIKeys["kong"])
+	}
+}

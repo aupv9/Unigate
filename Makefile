@@ -1,4 +1,4 @@
-.PHONY: build run test vet lint proto docker-up docker-down fmt
+.PHONY: build run test vet lint proto docker-up docker-down fmt openapi-lint
 
 build:
 	go build -o bin/unigate-server ./cmd/server
@@ -28,3 +28,7 @@ docker-up:
 
 docker-down:
 	docker compose -f deploy/docker/docker-compose.yaml down -v
+
+# Validate api/openapi.yaml. Requires: pip install openapi-spec-validator
+openapi-lint:
+	openapi-spec-validator api/openapi.yaml

@@ -6,3 +6,6 @@
 
 # local overrides
 config.local.override.yaml
+
+# real secrets for docker-compose (see .env.example) - never commit
+.env

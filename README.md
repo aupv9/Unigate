@@ -79,6 +79,37 @@ without redeploying via the Admin API:
 curl -s localhost:8081/v1/admin/rules | jq
 ```
 
+### API reference
+
+`api/openapi.yaml` is the OpenAPI 3.0 spec for the full HTTP surface
+(`/v1/check`, `/v1/reset`, `/healthz`, and the `/v1/admin/rules*`
+CRUD endpoints) - schemas match the Go DTOs exactly, including the
+`Rule` shape used by the Admin API. View it with any OpenAPI tool, e.g.:
+
+```sh
+npx @redocly/cli preview-docs api/openapi.yaml
+```
+
+It's linted in CI (`make openapi-lint`, requires
+`pip install openapi-spec-validator`) so it can't silently drift from
+the code. The equivalent gRPC API is defined in
+`proto/ratelimit/v1/ratelimit.proto`.
+
+### Secrets
+
+`deploy/config/config.yaml` never contains real secrets: Redis
+password and per-gateway API keys are written as `${VAR}` /
+`${VAR:-default}`, expanded from the process environment at load time
+(`internal/config/envexpand.go`) - the same syntax as shell/
+docker-compose parameter expansion. The `:-change-me-*` fallbacks only
+exist so local dev works with zero setup; never let them reach a real
+deployment.
+
+To set real values for `make docker-up`, copy `.env.example` to `.env`
+(gitignored) at the repo root and fill it in - `docker-compose.yaml`
+loads it into the `unigate` container's environment. Outside Docker,
+just export the same variables before running the binary.
+
 ## Testing
 
 ```sh
