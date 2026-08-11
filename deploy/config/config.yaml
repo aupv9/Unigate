@@ -14,13 +14,21 @@ redis:
   dial_timeout: 500ms
   read_timeout: 200ms
   write_timeout: 200ms
+  # ${VAR} / ${VAR:-default} are expanded from the process environment
+  # at load time (see internal/config/envexpand.go) - never commit a
+  # real password here. Empty when unset, matching an unauthenticated
+  # local Redis.
+  password: "${UNIGATE_REDIS_PASSWORD:-}"
 
-# Per-gateway API keys (NFR5). Leave empty to disable auth for local dev.
+# Per-gateway API keys (NFR5). Set the real values via environment
+# variables in every non-local environment - the ":-change-me-*"
+# fallback here only exists so local dev works out of the box. See
+# .env.example for the full list of variables this config expects.
 auth:
   api_keys:
-    kong: "change-me-kong"
-    apisix: "change-me-apisix"
-    apigee: "change-me-apigee"
+    kong: "${UNIGATE_KONG_API_KEY:-change-me-kong}"
+    apisix: "${UNIGATE_APISIX_API_KEY:-change-me-apisix}"
+    apigee: "${UNIGATE_APIGEE_API_KEY:-change-me-apigee}"
 
 rules:
   # FR5: brute-force login protection, composite IP+username key,

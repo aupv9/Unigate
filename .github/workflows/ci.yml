@@ -90,3 +90,12 @@ jobs:
       - name: Validate resource JS syntax
         run: |
           find adapters/apigee -name '*.js' -print0 | xargs -0 -n1 node --check
+
+  openapi-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install openapi-spec-validator
+        run: pip install openapi-spec-validator
+      - name: Validate api/openapi.yaml
+        run: openapi-spec-validator api/openapi.yaml

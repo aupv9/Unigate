@@ -26,3 +26,9 @@ services:
       - "9100:9100" # Prometheus metrics
     volumes:
       - ../config/config.yaml:/etc/unigate/config.yaml:ro
+    # Real secrets: copy ../../.env.example to ../../.env (gitignored)
+    # and edit it. config.yaml's ${VAR:-default} fallbacks mean this
+    # file is optional for local dev.
+    env_file:
+      - path: ../../.env
+        required: false

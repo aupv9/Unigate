@@ -1,0 +1,444 @@
+openapi: 3.0.3
+info:
+  title: Unigate Universal Rate Limiting Service
+  description: |
+    HTTP API for the centralized rate-limit / brute-force protection
+    "brain" described in docs/PRD.md. Gateway adapters (Kong, APISIX,
+    Apigee) call `POST /v1/check` instead of running their own
+    rate-limit engine; security teams manage rules through the Admin
+    API without redeploying any gateway (FR8).
+
+    This spec covers the HTTP transport only (`internal/api/httpserver`,
+    `internal/api/adminserver`). An equivalent gRPC API is defined in
+    `proto/ratelimit/v1/ratelimit.proto`.
+  version: "1.0.0"
+  license:
+    name: See repository LICENSE
+servers:
+  - url: http://localhost:8080
+    description: CheckLimit/Reset HTTP API (server.http_addr in config.yaml)
+
+security:
+  - GatewayHeader: []
+    ApiKeyHeader: []
+
+tags:
+  - name: check
+    description: Rate-limit decisions (FR1)
+  - name: admin
+    description: Rule CRUD, no redeploy required (FR8)
+  - name: health
+    description: Liveness
+
+paths:
+  /v1/check:
+    post:
+      tags: [check]
+      summary: Evaluate a rate-limit rule for a composite key (FR1-FR5)
+      description: |
+        Evaluates `rule_id` for the given composite key. Response
+        headers `X-RateLimit-Limit` / `X-RateLimit-Remaining` /
+        `X-RateLimit-Reset` are always set (FR7); `Retry-After` is set
+        only when the request is blocked. HTTP status is `200` when
+        allowed and `429` when blocked - the response body shape is
+        identical either way, distinguished by the `allow` field.
+      operationId: checkLimit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckLimitRequest"
+            examples:
+              bruteForceLogin:
+                summary: Composite IP+username key against a brute-force rule
+                value:
+                  rule_id: login-brute-force
+                  key:
+                    - kind: ip
+                      value: 203.0.113.7
+                    - kind: username
+                      value: alice
+                  gateway: kong
+      responses:
+        "200":
+          description: Allowed
+          headers:
+            X-RateLimit-Limit: { $ref: "#/components/headers/RateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/RateLimitRemaining" }
+            X-RateLimit-Reset: { $ref: "#/components/headers/RateLimitReset" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckLimitResponse"
+        "429":
+          description: Blocked - over the rate limit, or currently locked out (FR5)
+          headers:
+            X-RateLimit-Limit: { $ref: "#/components/headers/RateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/RateLimitRemaining" }
+            X-RateLimit-Reset: { $ref: "#/components/headers/RateLimitReset" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckLimitResponse"
+        "400":
+          description: Malformed request or missing rule_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: Missing/invalid gateway API key (NFR5, when auth.api_keys is configured)
+        "404":
+          description: Unknown rule_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Internal error (rare - most store errors are absorbed by the rule's fail_open/fail_closed mode, FR10)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/reset:
+    post:
+      tags: [check]
+      summary: Clear counters/lockout state for a key (operational/testing use)
+      operationId: resetLimit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetRequest"
+      responses:
+        "200":
+          description: Reset applied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OkResponse" }
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Unknown rule_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /v1/admin/rules:
+    servers:
+      - url: http://localhost:8081
+        description: Admin HTTP API (server.admin_addr in config.yaml)
+    get:
+      tags: [admin]
+      summary: List rules (FR8)
+      operationId: listRules
+      parameters:
+        - name: namespace
+          in: query
+          description: Filter to rules in this namespace (NFR7); omit for all namespaces
+          schema: { type: string }
+      responses:
+        "200":
+          description: Rules matching the filter
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Rule" }
+    post:
+      tags: [admin]
+      summary: Create a rule
+      operationId: createRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Rule" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "400":
+          description: Missing id or invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: A rule with this id already exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/admin/rules/{id}:
+    servers:
+      - url: http://localhost:8081
+        description: Admin HTTP API (server.admin_addr in config.yaml)
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [admin]
+      summary: Get a single rule
+      operationId: getRule
+      responses:
+        "200":
+          description: The rule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    put:
+      tags: [admin]
+      summary: Update a rule (takes effect on every instance within one registry-refresh interval, no redeploy)
+      operationId: updateRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Rule" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      tags: [admin]
+      summary: Delete a rule
+      operationId: deleteRule
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OkResponse" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+components:
+  securitySchemes:
+    GatewayHeader:
+      type: apiKey
+      in: header
+      name: X-Unigate-Gateway
+      description: Which gateway is calling (e.g. "kong", "apisix", "apigee") - identifies which entry in auth.api_keys to check against.
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-Unigate-Api-Key
+      description: |
+        Per-gateway shared secret (NFR5). Both this header and
+        X-Unigate-Gateway are required together when auth.api_keys is
+        non-empty in config.yaml; auth is disabled entirely (no headers
+        required) when it's empty, which is the default for local dev.
+
+  headers:
+    RateLimitLimit:
+      description: The window's configured limit
+      schema: { type: integer, format: int64 }
+    RateLimitRemaining:
+      description: Requests remaining in the current window
+      schema: { type: integer, format: int64 }
+    RateLimitReset:
+      description: Seconds until the window resets
+      schema: { type: integer, format: int64 }
+    RetryAfter:
+      description: Seconds until the client should retry
+      schema: { type: integer, format: int64 }
+
+  schemas:
+    KeyComponent:
+      type: object
+      description: One piece of a composite rate-limit key (FR3)
+      required: [kind, value]
+      properties:
+        kind:
+          type: string
+          description: e.g. "ip", "username", "api_key", or any header name the adapter was configured to extract
+          example: ip
+        value:
+          type: string
+          example: 203.0.113.7
+
+    CheckLimitRequest:
+      type: object
+      required: [rule_id]
+      properties:
+        rule_id:
+          type: string
+          example: login-brute-force
+        key:
+          type: array
+          items: { $ref: "#/components/schemas/KeyComponent" }
+          description: Must supply every key_parts component the rule requires (FR3)
+        cost:
+          type: integer
+          format: int64
+          default: 1
+          description: Request weight; defaults to 1 if omitted or <= 0
+        gateway:
+          type: string
+          description: Calling gateway name, used for audit/metrics (FR9) and auth (NFR5)
+          example: kong
+        namespace:
+          type: string
+          description: Overrides the rule's configured namespace when set (NFR7)
+
+    CheckLimitResponse:
+      type: object
+      properties:
+        allow: { type: boolean }
+        limit: { type: integer, format: int64 }
+        remaining: { type: integer, format: int64 }
+        reset_seconds: { type: integer, format: int64 }
+        retry_after_seconds:
+          type: integer
+          format: int64
+          description: Present only when allow=false
+        locked_out:
+          type: boolean
+          description: True if blocked due to an escalated brute-force lockout rather than a plain rate-limit breach (FR5)
+        lockout_remaining_seconds:
+          type: integer
+          format: int64
+          description: Present only when locked_out=true
+        matched_window:
+          type: string
+          description: Which configured window (as a Go duration string, e.g. "1m0s") caused the block, if any
+
+    ResetRequest:
+      type: object
+      required: [rule_id]
+      properties:
+        rule_id: { type: string }
+        key:
+          type: array
+          items: { $ref: "#/components/schemas/KeyComponent" }
+        namespace: { type: string }
+
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean, example: true }
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+
+    Window:
+      type: object
+      required: [limit, period]
+      properties:
+        limit:
+          type: integer
+          format: int64
+          description: Max requests allowed in this window
+        period:
+          type: string
+          description: |
+            A Go duration string. Accepts any value time.ParseDuration
+            understands on input (e.g. "5m", "1h30m", "500ms"); GET
+            responses echo it back in Go's canonical form (e.g. "1m0s").
+          example: 1m
+
+    LockoutStep:
+      type: object
+      required: [after_violations, lockout]
+      properties:
+        after_violations:
+          type: integer
+          description: Consecutive violations that trigger this step
+        lockout:
+          type: string
+          description: Duration string (see Window.period) applied once this step is reached
+          example: 5m
+
+    LockoutPolicy:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/LockoutStep" }
+          description: Ordered ascending by after_violations (FR5)
+        violation_ttl:
+          type: string
+          description: Duration string; how long a violation stays "consecutive" (see Window.period)
+          example: 1h
+
+    Rule:
+      type: object
+      description: The Admin API's on-the-wire rule shape, matching config.RuleConfig 1:1 (FR2-FR5, FR8)
+      required: [id, key_parts, windows]
+      properties:
+        id:
+          type: string
+          example: login-brute-force
+        description:
+          type: string
+        algorithm:
+          type: string
+          enum: [sliding_window, gcra]
+          default: sliding_window
+          description: sliding_window is exact (FR4); gcra smooths bursts via a token bucket
+        key_parts:
+          type: array
+          items: { type: string }
+          description: Composite key definition, e.g. ["ip"], ["username"], or ["ip","username"] (FR3)
+          example: ["ip", "username"]
+        windows:
+          type: array
+          items: { $ref: "#/components/schemas/Window" }
+          description: One or more time-windowed thresholds evaluated atomically together (FR2)
+        burst:
+          type: integer
+          format: int64
+          description: GCRA burst allowance; ignored for sliding_window
+        lockout:
+          $ref: "#/components/schemas/LockoutPolicy"
+        fail_mode:
+          type: string
+          enum: [fail_open, fail_closed]
+          default: fail_closed
+          description: What to do when the backing store errors (FR10)
+        namespace:
+          type: string
+          default: default
+          description: Environment/gateway namespace to avoid key collisions on a shared Redis (NFR7)
