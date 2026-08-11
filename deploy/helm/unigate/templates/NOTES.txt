@@ -1,0 +1,27 @@
+Unigate ({{ .Chart.Name }} {{ .Chart.AppVersion }}) has been deployed.
+
+Check rollout status:
+  kubectl rollout status deployment/{{ include "unigate.fullname" . }} -n {{ .Release.Namespace }}
+
+Port-forward to try it locally:
+  kubectl port-forward svc/{{ include "unigate.fullname" . }} 8080:{{ .Values.ports.http }} -n {{ .Release.Namespace }}
+  curl -s localhost:8080/v1/check -d '{"rule_id":"login-brute-force","key":[{"kind":"ip","value":"1.2.3.4"},{"kind":"username","value":"alice"}]}'
+
+Admin API (rule CRUD without redeploying, FR8):
+  kubectl port-forward svc/{{ include "unigate.fullname" . }} 8081:{{ .Values.ports.admin }} -n {{ .Release.Namespace }}
+  curl -s localhost:8081/v1/admin/rules
+
+{{- if not .Values.redis.passwordSecretName }}
+
+NOTE: redis.passwordSecretName is not set - the service expects an
+unauthenticated Redis. Set it (and create the referenced Secret) for
+any Redis that requires AUTH.
+{{- end }}
+{{- if not .Values.auth.existingSecret }}
+
+NOTE: auth.existingSecret is not set - adapter API-key auth (NFR5) is
+disabled, matching this chart's default. Set it once your gateways are
+configured to send X-Unigate-Api-Key.
+{{- end }}
+
+See docs/RUNBOOK.md in the repo for operational guidance.

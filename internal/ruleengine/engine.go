@@ -23,6 +23,11 @@ type AuditEvent struct {
 	Allow      bool
 	LockedOut  bool
 	FailedOpen bool
+	// Duration is the wall-clock time CheckLimit's rule evaluation took
+	// (store round-trips included), for the NFR1 added-latency metric.
+	// It uses real wall-clock time regardless of Engine.clock, which
+	// tests override to a fixed value for deterministic rate-limit math.
+	Duration time.Duration
 }
 
 type Engine struct {
@@ -50,6 +55,7 @@ func New(registry *Registry, s *store.Store, log *slog.Logger, audit AuditFunc) 
 }
 
 func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult, error) {
+	start := time.Now()
 	rule, ok := e.registry.Get(req.RuleID)
 	if !ok {
 		return nil, ErrRuleNotFound
@@ -80,6 +86,7 @@ func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult
 		e.audit(AuditEvent{
 			Gateway: req.Gateway, RuleID: rule.ID, Namespace: namespace,
 			Identity: identity, Allow: failOpen, FailedOpen: true,
+			Duration: time.Since(start),
 		})
 		return &CheckResult{
 			Allow:      failOpen,
@@ -91,6 +98,7 @@ func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult
 	e.audit(AuditEvent{
 		Gateway: req.Gateway, RuleID: rule.ID, Namespace: namespace,
 		Identity: identity, Allow: result.Allow, LockedOut: result.LockedOut,
+		Duration: time.Since(start),
 	})
 	result.Namespace = namespace
 	return result, nil

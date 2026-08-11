@@ -1,0 +1,157 @@
+{
+  "title": "Unigate - Rate Limit / Brute-Force Overview",
+  "uid": "unigate-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["unigate"],
+  "templating": {
+    "list": [
+      {
+        "name": "gateway",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(unigate_checks_total, gateway)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      },
+      {
+        "name": "rule_id",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(unigate_checks_total, rule_id)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Allow vs Block rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(unigate_checks_total{gateway=~\"$gateway\", rule_id=~\"$rule_id\"}[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Block rate by rule",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (rule_id, reason) (rate(unigate_blocks_total{gateway=~\"$gateway\", rule_id=~\"$rule_id\"}[5m]))",
+          "legendFormat": "{{rule_id}} ({{reason}})"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Brute-force lockouts (new per 10m)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (rule_id, gateway) (increase(unigate_lockouts_total{gateway=~\"$gateway\", rule_id=~\"$rule_id\"}[10m]))",
+          "legendFormat": "{{rule_id}} via {{gateway}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "CheckLimit latency (p50 / p99) by gateway",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, gateway) (rate(unigate_check_duration_seconds_bucket{gateway=~\"$gateway\"}[5m])))",
+          "legendFormat": "p50 {{gateway}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, gateway) (rate(unigate_check_duration_seconds_bucket{gateway=~\"$gateway\"}[5m])))",
+          "legendFormat": "p99 {{gateway}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Fail-mode activations (5m)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "sum(increase(unigate_fail_mode_total[5m]))" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Total lockouts (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(increase(unigate_lockouts_total[24h]))" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Top blocked rules (1h)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (rule_id, gateway) (increase(unigate_blocks_total[1h])))",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Fail-mode by rule (fail_open vs fail_closed, 24h)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (rule_id, mode) (increase(unigate_fail_mode_total[24h]))",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}

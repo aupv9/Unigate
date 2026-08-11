@@ -99,3 +99,71 @@ jobs:
         run: pip install openapi-spec-validator
       - name: Validate api/openapi.yaml
         run: openapi-spec-validator api/openapi.yaml
+
+  helm-and-observability-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: helm lint
+        run: helm lint deploy/helm/unigate
+
+      - name: helm template (default values)
+        run: helm template unigate deploy/helm/unigate > /tmp/rendered-default.yaml
+
+      - name: helm template (secrets + autoscaling off)
+        run: |
+          helm template unigate deploy/helm/unigate \
+            --set redis.passwordSecretName=redis-secret \
+            --set auth.existingSecret=unigate-gateway-keys \
+            --set autoscaling.enabled=false \
+            > /tmp/rendered-secrets.yaml
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install kubeconform
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Validate rendered manifests against the Kubernetes API schema
+        run: |
+          kubeconform -strict -summary /tmp/rendered-default.yaml
+          kubeconform -strict -summary /tmp/rendered-secrets.yaml
+
+      - name: Install promtool
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends prometheus
+
+      - name: Validate Prometheus config + alert rules
+        run: |
+          promtool check rules deploy/observability/prometheus/alerts.yml
+          sed 's#/etc/prometheus/alerts.yml#alerts.yml#' deploy/observability/prometheus/prometheus.yml \
+            > deploy/observability/prometheus/prometheus.ci-check.yml
+          (cd deploy/observability/prometheus && promtool check config prometheus.ci-check.yml)
+          rm deploy/observability/prometheus/prometheus.ci-check.yml
+
+      - name: Validate Grafana dashboard JSON + PromQL syntax
+        run: |
+          pip install pyyaml
+          python3 -c "import json; json.load(open('deploy/observability/grafana/dashboards/unigate.json'))"
+          python3 -c "
+          import json
+          d = json.load(open('deploy/observability/grafana/dashboards/unigate.json'))
+          exprs = [t['expr'].replace('\$gateway', '.*').replace('\$rule_id', '.*')
+                   for p in d['panels'] for t in p.get('targets', [])]
+          open('/tmp/dashboard_exprs.txt', 'w').write('\n'.join(exprs))
+          "
+          python3 -c "
+          import yaml
+          exprs = [l.strip() for l in open('/tmp/dashboard_exprs.txt') if l.strip()]
+          doc = {'groups': [{'name': 'dashboard-expr-check',
+                              'rules': [{'record': f'test_expr_{i}', 'expr': e} for i, e in enumerate(exprs)]}]}
+          yaml.safe_dump(doc, open('/tmp/dashboard_exprs_check.yml', 'w'))
+          "
+          promtool check rules /tmp/dashboard_exprs_check.yml

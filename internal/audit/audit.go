@@ -30,6 +30,7 @@ func (r *Recorder) Record(evt ruleengine.AuditEvent) {
 		result = "block"
 	}
 	metrics.ChecksTotal.WithLabelValues(evt.Gateway, evt.RuleID, result).Inc()
+	metrics.CheckDuration.WithLabelValues(evt.Gateway).Observe(evt.Duration.Seconds())
 
 	if evt.FailedOpen {
 		mode := "fail_closed"

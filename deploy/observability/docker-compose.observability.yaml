@@ -1,0 +1,53 @@
+# Local observability stack for the security/on-call dashboards (G6):
+# Unigate + Redis, plus Prometheus (scraping /metrics + evaluating
+# alerts.yml) and Grafana (pre-provisioned with the Prometheus
+# datasource and the "Unigate Overview" dashboard).
+#
+#   docker compose -f deploy/observability/docker-compose.observability.yaml up -d --build
+#   open http://localhost:3000  (Grafana, admin/admin)
+#   open http://localhost:9091  (Prometheus)
+#   docker compose -f deploy/observability/docker-compose.observability.yaml down -v
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  unigate:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../config/config.yaml:/etc/unigate/config.yaml:ro
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    depends_on:
+      - unigate
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9091:9090"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
