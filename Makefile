@@ -1,4 +1,5 @@
-.PHONY: build run test vet lint proto docker-up docker-down fmt openapi-lint
+.PHONY: build run test vet lint proto docker-up docker-down fmt openapi-lint \
+	observability-up observability-down helm-lint helm-template prom-check
 
 build:
 	go build -o bin/unigate-server ./cmd/server
@@ -32,3 +33,20 @@ docker-down:
 # Validate api/openapi.yaml. Requires: pip install openapi-spec-validator
 openapi-lint:
 	openapi-spec-validator api/openapi.yaml
+
+observability-up:
+	docker compose -f deploy/observability/docker-compose.observability.yaml up --build
+
+observability-down:
+	docker compose -f deploy/observability/docker-compose.observability.yaml down -v
+
+# Requires: promtool (part of the prometheus package)
+prom-check:
+	promtool check rules deploy/observability/prometheus/alerts.yml
+
+# Requires: helm
+helm-lint:
+	helm lint deploy/helm/unigate
+
+helm-template:
+	helm template unigate deploy/helm/unigate

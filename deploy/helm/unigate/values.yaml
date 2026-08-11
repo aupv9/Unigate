@@ -1,0 +1,139 @@
+# Default values for the unigate chart. Override with -f my-values.yaml
+# or --set. See deploy/config/config.yaml for the config.yaml shape
+# these values render into (templates/configmap.yaml).
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/your-org/unigate
+  tag: "" # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Ports the service binds internally (config.yaml server.*_addr) - not
+# generally something you need to change; the k8s Service maps these
+# to the same port numbers.
+ports:
+  http: 8080 # CheckLimit/Reset
+  admin: 8081 # Admin API (rule CRUD)
+  grpc: 9090
+  metrics: 9100
+
+service:
+  type: ClusterIP
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# NFR3: stateless service, scale horizontally.
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# NFR2: availability target - keep at least this many pods up across
+# voluntary disruptions (node drains, rolling upgrades of the node pool).
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+redis:
+  addrs: ["redis:6379"]
+  clusterMode: false
+  db: 0
+  dialTimeout: 500ms
+  readTimeout: 200ms
+  writeTimeout: 200ms
+  # Name of an existing Secret holding the Redis password under
+  # `passwordSecretKey` (NFR5-adjacent: never put real secrets in
+  # values.yaml/ConfigMaps). Leave empty for an unauthenticated Redis.
+  passwordSecretName: ""
+  passwordSecretKey: "redis-password"
+
+auth:
+  # Name of an existing Secret holding per-gateway API keys under the
+  # keys below (NFR5). Leave empty to disable adapter auth entirely -
+  # matches config.yaml's default, fine for a cluster-internal Redis
+  # and mesh-enforced mTLS between namespaces.
+  existingSecret: ""
+  kongKeyKey: "kong-api-key"
+  apisixKeyKey: "apisix-api-key"
+  apigeeKeyKey: "apigee-api-key"
+
+# Full RuleConfig list, same shape as deploy/config/config.yaml's
+# top-level `rules:` (FR2-FR5, FR8). These seed the initial rule set;
+# changes can also be made at runtime via the Admin API without a helm
+# upgrade (see docs/RUNBOOK.md).
+rules:
+  - id: login-brute-force
+    description: "Lock out IP+username combos after repeated failed logins"
+    algorithm: sliding_window
+    key_parts: ["ip", "username"]
+    namespace: default
+    fail_mode: fail_closed
+    windows:
+      - limit: 5
+        period: 1m
+    lockout:
+      enabled: true
+      violation_ttl: 1h
+      steps:
+        - after_violations: 1
+          lockout: 1m
+        - after_violations: 3
+          lockout: 5m
+        - after_violations: 6
+          lockout: 30m
+
+  - id: anonymous-ip-limit
+    description: "Smooth per-IP request rate for unauthenticated traffic"
+    algorithm: gcra
+    key_parts: ["ip"]
+    namespace: default
+    fail_mode: fail_open
+    burst: 20
+    windows:
+      - limit: 100
+        period: 1m
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5

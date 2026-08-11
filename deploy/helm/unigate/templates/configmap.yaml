@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "unigate.fullname" . }}-config
+  labels:
+    {{- include "unigate.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      grpc_addr: ":{{ .Values.ports.grpc }}"
+      http_addr: ":{{ .Values.ports.http }}"
+      admin_addr: ":{{ .Values.ports.admin }}"
+      metrics_addr: ":{{ .Values.ports.metrics }}"
+
+    redis:
+      addrs:
+        {{- range .Values.redis.addrs }}
+        - {{ . | quote }}
+        {{- end }}
+      cluster_mode: {{ .Values.redis.clusterMode }}
+      db: {{ .Values.redis.db }}
+      dial_timeout: {{ .Values.redis.dialTimeout | quote }}
+      read_timeout: {{ .Values.redis.readTimeout | quote }}
+      write_timeout: {{ .Values.redis.writeTimeout | quote }}
+      # Expanded from the UNIGATE_REDIS_PASSWORD env var at process
+      # startup (internal/config/envexpand.go) - sourced from
+      # .Values.redis.passwordSecretName below, never stored here.
+      password: "${UNIGATE_REDIS_PASSWORD:-}"
+
+    # Expanded from env vars sourced from .Values.auth.existingSecret
+    # below (NFR5). Unset -> empty -> adapter auth disabled for that
+    # gateway, same default as deploy/config/config.yaml.
+    auth:
+      api_keys:
+        kong: "${UNIGATE_KONG_API_KEY:-}"
+        apisix: "${UNIGATE_APISIX_API_KEY:-}"
+        apigee: "${UNIGATE_APIGEE_API_KEY:-}"
+
+    rules:
+      {{- .Values.rules | toYaml | nindent 6 }}

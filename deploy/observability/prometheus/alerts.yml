@@ -1,0 +1,74 @@
+groups:
+  - name: unigate.rules
+    rules:
+      - alert: UnigateServiceDown
+        expr: up{job="unigate"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Unigate rate-limit service is down"
+          description: >-
+            Prometheus hasn't scraped {{ $labels.instance }} for 1m.
+            Every gateway calling CheckLimit is now falling back to its
+            per-rule fail_open/fail_closed mode (FR10) - see
+            docs/RUNBOOK.md "Redis / service outage".
+
+      - alert: UnigateFailModeActivated
+        expr: increase(unigate_fail_mode_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unigate fell back to {{ $labels.mode }} for rule {{ $labels.rule_id }}"
+          description: >-
+            The backing Redis store errored and rule {{ $labels.rule_id }}
+            applied its fail_mode ({{ $labels.mode }}) {{ $value }}
+            time(s) in the last 5m. Check Redis connectivity/health
+            (NFR2). fail_open means traffic is currently NOT being rate
+            limited for this rule; fail_closed means it's being blocked
+            outright.
+
+      - alert: UnigateHighBlockRate
+        expr: sum by (rule_id) (rate(unigate_blocks_total[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High block rate on rule {{ $labels.rule_id }}"
+          description: >-
+            Rule {{ $labels.rule_id }} has been blocking more than 5
+            req/s (5m average) for 2m - could be a brute-force attack
+            in progress, or a misconfigured legitimate client (G6).
+            Cross-check with unigate_lockouts_total and the
+            rate_limit_block audit log for the offending identities.
+
+      - alert: UnigateLockoutSpike
+        expr: increase(unigate_lockouts_total[10m]) > 20
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spike in brute-force lockouts for rule {{ $labels.rule_id }}"
+          description: >-
+            {{ $value }} new escalated lockouts on rule
+            {{ $labels.rule_id }} via gateway {{ $labels.gateway }} in
+            the last 10m. Review the audit log
+            ("rate_limit_block" entries with locked_out=true) for the
+            attacking IPs/accounts.
+
+      - alert: UnigateCheckLatencyHigh
+        expr: >-
+          histogram_quantile(0.99, sum by (le, gateway) (rate(unigate_check_duration_seconds_bucket[5m])))
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CheckLimit p99 latency high for gateway {{ $labels.gateway }}"
+          description: >-
+            p99 CheckLimit latency for gateway {{ $labels.gateway }}
+            has been above 50ms for 5m. NFR1 targets <=5ms when the
+            service is co-located with the gateway; 50ms is a
+            conservative default threshold here - tune it to your
+            environment's real same-region baseline once you have one.

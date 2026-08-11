@@ -155,6 +155,9 @@ staged) plus a first cut of Phase 2-4 items:
 | NFR4 (atomic ops) | Redis Lua scripts in `internal/store/*.lua` |
 | NFR5 (adapter auth) | `internal/api/authmw`; secrets kept out of config via `internal/config/envexpand.go` (`${VAR}`/`${VAR:-default}`) + `.env.example` |
 | NFR7 (namespacing) | `config.RuleConfig.Namespace`, `internal/store` key hashing |
+| G6 / FR9 (security team dashboard + alerting) | `deploy/observability/` (Prometheus + Grafana, `docker-compose.observability.yaml`), `docs/RUNBOOK.md` |
+| NFR2/NFR3 (availability, horizontal scaling) | `deploy/helm/unigate` (HPA, PodDisruptionBudget) |
 | (docs) HTTP API reference | `api/openapi.yaml`, linted in CI |
+| (ops) On-call runbook | `docs/RUNBOOK.md` |
 
 See the top-level `README.md` for how to run and test this locally.

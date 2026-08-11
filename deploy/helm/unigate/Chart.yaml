@@ -1,0 +1,13 @@
+apiVersion: v2
+name: unigate
+description: Universal Rate Limiting Service - centralized rate-limit / brute-force protection brain for multi-gateway systems (Kong / APISIX / Apigee)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/aupv9/Unigate
+sources:
+  - https://github.com/aupv9/Unigate
+keywords:
+  - rate-limiting
+  - brute-force-protection
+  - api-gateway
