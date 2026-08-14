@@ -79,6 +79,22 @@ without redeploying via the Admin API:
 curl -s localhost:8081/v1/admin/rules | jq
 ```
 
+Every update is versioned automatically (up to the last 10 per rule),
+and can be rolled back without hand-editing thresholds back in:
+
+```sh
+curl -s localhost:8081/v1/admin/rules/login-brute-force/versions | jq
+curl -s -X POST localhost:8081/v1/admin/rules/login-brute-force/rollback   # -> previous version
+```
+
+Rollback reapplies old content as a **new** version (like `git
+revert`) rather than destructively rewinding, so the history stays a
+complete audit trail - see `docs/RUNBOOK.md`. Verified in
+`internal/ruleengine/registry_test.go`, including that version numbers
+and history converge correctly across multiple stateless instances
+sharing the same Redis (a real cross-instance test, not just
+single-process).
+
 ### API reference
 
 `api/openapi.yaml` is the OpenAPI 3.0 spec for the full HTTP surface
@@ -110,6 +126,40 @@ To set real values for `make docker-up`, copy `.env.example` to `.env`
 loads it into the `unigate` container's environment. Outside Docker,
 just export the same variables before running the binary.
 
+### mTLS
+
+NFR5 can also be satisfied with native mutual TLS instead of (or
+alongside) the API-key auth above - see the commented `server.tls`
+block in `deploy/config/config.yaml`. It applies uniformly to the
+gRPC, CheckLimit HTTP, and Admin HTTP listeners (not the metrics
+endpoint, which assumes internal-network-only Prometheus scraping).
+Set `require_client_cert: false` for server-side-only TLS, or `true`
+plus `client_ca_file` for full mTLS where every adapter must present a
+certificate signed by that CA. Verified in
+`internal/tlsutil/tlsutil_test.go` (generates a real CA + certs and
+proves the handshake actually rejects missing/untrusted client certs,
+not just that the config parses) and manually against the running
+binary with `curl --cert/--key` and a raw gRPC client.
+
+### Tracing
+
+OpenTelemetry distributed tracing across the whole `CheckLimit` path -
+gRPC/HTTP request → rule engine evaluation → each Redis Lua call - via
+the `tracing` block in `deploy/config/config.yaml`, exported over
+OTLP/HTTP to any collector (OpenTelemetry Collector, Jaeger, Tempo).
+Disabled by default. Instrumentation lives in `internal/tracing`
+(provider setup), `internal/ruleengine/engine.go` (the top-level
+`CheckLimit` span), `internal/store/*.go` (a child span per Redis
+call - `redis.sliding_window`, `redis.gcra`, `redis.lockout.*`), and
+`cmd/server/main.go` (`otelgrpc`/`otelhttp` wrapping the transport
+layers). Verified two ways: `internal/ruleengine/tracing_test.go` uses
+an in-memory span exporter to prove `CheckLimit` produces a span with
+the expected attributes *and* that the store's Redis call shows up as
+its child (real context propagation, not just a span existing); and
+manually, by pointing the running binary at a throwaway local HTTP
+server standing in for an OTLP collector and confirming it actually
+receives protobuf-encoded trace data after a request.
+
 ## Testing
 
 ```sh
@@ -119,9 +169,22 @@ make vet
 
 Every layer has coverage: `internal/config`, `internal/store` (sliding
 window / GCRA / lockout, atomicity), `internal/ruleengine` (fail-open/
-closed, lockout escalation), and the API surface gateways actually call
+closed, lockout escalation), the API surface gateways actually call
 (`internal/api/httpserver`, `internal/api/grpcserver`,
-`internal/api/adminserver`, `internal/api/authmw`).
+`internal/api/adminserver`, `internal/api/authmw`), and mTLS enforcement
+(`internal/tlsutil`).
+
+`internal/store/cluster_test.go` goes further than `cluster_mode:
+true` in isolation - it spins up a **real 3-master Redis Cluster**
+(`redis-server --cluster-enabled yes` + `redis-cli --cluster create`)
+and re-runs the sliding-window/GCRA/lockout checks against it (NFR3).
+This matters because the sliding-window script takes multiple `KEYS`
+in one Lua call; under real cluster sharding that fails with
+`CROSSSLOT` unless every key hashes to the same slot, so this is what
+actually proves the `{namespace:ruleID:identity}` hash-tag design
+(`internal/store/client.go`) works, rather than just asserting it by
+inspection. It also confirms different identities really do land on
+different nodes (not all funneled onto one).
 
 CI (`.github/workflows/ci.yml`) runs `go build`/`go vet`/`gofmt`/
 `go test` on every PR, plus a proto-regen diff check and Lua/JS/XML
@@ -211,6 +274,19 @@ live cluster here** (no cluster available in this dev environment) —
 validated with `helm lint`, `helm template` (both with and without
 secrets/autoscaling set), and `kubeconform -strict` against the
 rendered manifests.
+
+## Load testing (NFR1)
+
+```sh
+go run ./cmd/loadtest -concurrency 50 -duration 10s
+```
+
+A small dependency-free Go tool that hammers `POST /v1/check` and
+reports latency percentiles (p50/p90/p99/p999), throughput, and error
+rate. See `docs/LOAD_TEST.md` for flags, methodology, and an example
+run - which is explicitly **not** a representative NFR1 baseline (ran
+on a shared dev sandbox, not co-located dedicated infrastructure); use
+the tool to establish your own baseline in the target environment.
 
 ## Regenerating protobuf code
 

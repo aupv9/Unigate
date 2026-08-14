@@ -6,9 +6,20 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	oteltrace "go.opentelemetry.io/otel/trace"
+
 	"github.com/aupv9/unigate/internal/config"
 	"github.com/aupv9/unigate/internal/store"
 )
+
+// tracer follows the standard OTel Go library-instrumentation
+// pattern: calling otel.Tracer(...) is always safe and is a correctly
+// behaving no-op until something (internal/tracing.Init, or a test's
+// own TracerProvider) has actually been installed globally.
+var tracer = otel.Tracer("github.com/aupv9/unigate/internal/ruleengine")
 
 // AuditFunc is called once per CheckLimit decision so the caller can
 // wire it up to metrics + audit logging (FR9) without ruleengine
@@ -55,9 +66,17 @@ func New(registry *Registry, s *store.Store, log *slog.Logger, audit AuditFunc) 
 }
 
 func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult, error) {
+	ctx, span := tracer.Start(ctx, "CheckLimit", oteltrace.WithAttributes(
+		attribute.String("unigate.rule_id", req.RuleID),
+		attribute.String("unigate.gateway", req.Gateway),
+	))
+	defer span.End()
+
 	start := time.Now()
 	rule, ok := e.registry.Get(req.RuleID)
 	if !ok {
+		span.RecordError(ErrRuleNotFound)
+		span.SetStatus(codes.Error, ErrRuleNotFound.Error())
 		return nil, ErrRuleNotFound
 	}
 
@@ -65,9 +84,15 @@ func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult
 	if req.Namespace != "" {
 		namespace = req.Namespace
 	}
+	span.SetAttributes(
+		attribute.String("unigate.namespace", namespace),
+		attribute.String("unigate.algorithm", string(rule.Algorithm)),
+	)
 
 	identity, err := buildIdentity(rule.KeyParts, req.Key)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
@@ -81,6 +106,8 @@ func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult
 	result, err := e.evaluate(ctx, rule, namespace, identity, cost, now)
 	if err != nil {
 		failOpen := rule.FailMode == config.FailOpen
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("unigate.failed_open", failOpen))
 		e.log.Error("ruleengine: store error, applying fail mode",
 			"rule_id", rule.ID, "fail_mode", rule.FailMode, "fail_open", failOpen, "err", err)
 		e.audit(AuditEvent{
@@ -94,6 +121,11 @@ func (e *Engine) CheckLimit(ctx context.Context, req CheckRequest) (*CheckResult
 			Namespace:  namespace,
 		}, nil
 	}
+
+	span.SetAttributes(
+		attribute.Bool("unigate.allow", result.Allow),
+		attribute.Bool("unigate.locked_out", result.LockedOut),
+	)
 
 	e.audit(AuditEvent{
 		Gateway: req.Gateway, RuleID: rule.ID, Namespace: namespace,

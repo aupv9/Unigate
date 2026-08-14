@@ -81,12 +81,20 @@ blast radius:
    curl -s localhost:8081/v1/admin/rules -d '{"id":"test-rule", "key_parts":["ip"], "windows":[{"limit":5,"period":"1m"}]}'
    curl -s localhost:8080/v1/check -d '{"rule_id":"test-rule","key":[{"kind":"ip","value":"1.2.3.4"}]}'
    ```
-3. **Save the previous JSON before updating an existing rule**
-   (`GET /v1/admin/rules/<id>`) — there's no built-in version history
-   yet, so that JSON is your rollback plan: `PUT` it back if the new
-   thresholds cause problems.
+3. **Every update is versioned automatically** — no need to
+   hand-save the previous JSON. If new thresholds cause problems:
+   ```sh
+   curl -s localhost:8081/v1/admin/rules/<id>/versions           # see history (most recent first)
+   curl -s -X POST localhost:8081/v1/admin/rules/<id>/rollback   # revert to the immediately preceding version
+   curl -s -X POST localhost:8081/v1/admin/rules/<id>/rollback -d '{"version": 3}'  # revert to a specific version
+   ```
+   Rollback reapplies old content as a **new** version (like `git
+   revert`), so the history stays a complete forward-only log — it
+   never destructively rewinds. Up to the last 10 versions are kept
+   per rule.
 4. **Expect ~5s propagation**, not instant, across every instance
-   (same registry-refresh mechanism as above).
+   (same registry-refresh mechanism as above) — this applies to
+   rollbacks too.
 5. Watch the Grafana dashboard's "Allow vs Block rate" and "Block rate
    by rule" panels for a few minutes after any threshold change to
    confirm it's not over-blocking legitimate traffic.

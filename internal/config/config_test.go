@@ -135,3 +135,75 @@ rules:
 		t.Errorf("expected empty string for unset var with no default, got %q", cfg.Auth.APIKeys["kong"])
 	}
 }
+
+func TestLoad_TLSDisabledByDefault(t *testing.T) {
+	path := writeTempConfig(t, `
+rules:
+  - id: r1
+    key_parts: ["ip"]
+    windows: [{limit: 1, period: 1m}]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Server.TLS.Enabled {
+		t.Errorf("expected TLS disabled by default")
+	}
+}
+
+func TestLoad_RejectsTLSEnabledWithoutCertFiles(t *testing.T) {
+	path := writeTempConfig(t, `
+server:
+  tls:
+    enabled: true
+rules:
+  - id: r1
+    key_parts: ["ip"]
+    windows: [{limit: 1, period: 1m}]
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatalf("expected error when tls.enabled=true without cert_file/key_file")
+	}
+}
+
+func TestLoad_RejectsRequireClientCertWithoutCAFile(t *testing.T) {
+	path := writeTempConfig(t, `
+server:
+  tls:
+    enabled: true
+    cert_file: server.crt
+    key_file: server.key
+    require_client_cert: true
+rules:
+  - id: r1
+    key_parts: ["ip"]
+    windows: [{limit: 1, period: 1m}]
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatalf("expected error when require_client_cert=true without client_ca_file")
+	}
+}
+
+func TestLoad_AcceptsValidTLSConfig(t *testing.T) {
+	path := writeTempConfig(t, `
+server:
+  tls:
+    enabled: true
+    cert_file: server.crt
+    key_file: server.key
+    require_client_cert: true
+    client_ca_file: ca.crt
+rules:
+  - id: r1
+    key_parts: ["ip"]
+    windows: [{limit: 1, period: 1m}]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Server.TLS.Enabled || !cfg.Server.TLS.RequireClientCert {
+		t.Fatalf("expected TLS enabled + require_client_cert, got %+v", cfg.Server.TLS)
+	}
+}

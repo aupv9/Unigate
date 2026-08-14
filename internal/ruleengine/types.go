@@ -9,6 +9,8 @@ var (
 	ErrRuleNotFound    = errors.New("ruleengine: rule not found")
 	ErrMissingKeyPart  = errors.New("ruleengine: request missing a required key component")
 	ErrDuplicateRuleID = errors.New("ruleengine: rule id already exists")
+	ErrNoHistory       = errors.New("ruleengine: rule has no history to roll back to")
+	ErrVersionNotFound = errors.New("ruleengine: requested version not found in history")
 )
 
 // KeyComponent is one piece of a composite rate-limit key, e.g.

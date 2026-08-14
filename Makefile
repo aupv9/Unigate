@@ -1,5 +1,5 @@
 .PHONY: build run test vet lint proto docker-up docker-down fmt openapi-lint \
-	observability-up observability-down helm-lint helm-template prom-check
+	observability-up observability-down helm-lint helm-template prom-check loadtest
 
 build:
 	go build -o bin/unigate-server ./cmd/server
@@ -50,3 +50,7 @@ helm-lint:
 
 helm-template:
 	helm template unigate deploy/helm/unigate
+
+# Load test against a running instance. See docs/LOAD_TEST.md.
+loadtest:
+	go run ./cmd/loadtest -concurrency 50 -duration 10s

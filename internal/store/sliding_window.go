@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // WindowSpec is one time-windowed threshold to evaluate atomically
@@ -32,6 +35,12 @@ type SlidingWindowResult struct {
 // in a single atomic Lua call: it only records the hit if every window would
 // still allow it (NFR4).
 func (s *Store) CheckSlidingWindow(ctx context.Context, namespace, ruleID, identity string, cost int64, windows []WindowSpec, now time.Time) (*SlidingWindowResult, error) {
+	ctx, span := tracer.Start(ctx, "redis.sliding_window", oteltrace.WithAttributes(
+		attribute.String("unigate.rule_id", ruleID),
+		attribute.Int("unigate.window_count", len(windows)),
+	))
+	defer span.End()
+
 	if len(windows) == 0 {
 		return nil, fmt.Errorf("sliding window check requires at least one window")
 	}
