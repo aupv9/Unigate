@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 type LockoutStep struct {
@@ -31,6 +34,11 @@ func (s *Store) RecordViolation(ctx context.Context, namespace, ruleID, identity
 }
 
 func (s *Store) runLockout(ctx context.Context, namespace, ruleID, identity, mode string, violationTTL time.Duration, steps []LockoutStep, now time.Time) (*LockoutResult, error) {
+	ctx, span := tracer.Start(ctx, "redis.lockout."+mode, oteltrace.WithAttributes(
+		attribute.String("unigate.rule_id", ruleID),
+	))
+	defer span.End()
+
 	tag := hashTagKey(namespace, ruleID, identity)
 	key := fmt.Sprintf("unigate:%s:lockout", tag)
 

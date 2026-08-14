@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"log/slog"
@@ -15,7 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	ratelimitv1 "github.com/aupv9/unigate/gen/go/ratelimit/v1"
 	"github.com/aupv9/unigate/internal/api/adminserver"
@@ -27,6 +31,8 @@ import (
 	"github.com/aupv9/unigate/internal/metrics"
 	"github.com/aupv9/unigate/internal/ruleengine"
 	"github.com/aupv9/unigate/internal/store"
+	"github.com/aupv9/unigate/internal/tlsutil"
+	"github.com/aupv9/unigate/internal/tracing"
 )
 
 func main() {
@@ -41,6 +47,19 @@ func main() {
 		log.Error("load config", "err", err)
 		os.Exit(1)
 	}
+
+	tracingShutdown, err := tracing.Init(context.Background(), cfg.Tracing)
+	if err != nil {
+		log.Error("init tracing", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracingShutdown(shutdownCtx); err != nil {
+			log.Warn("tracing shutdown", "err", err)
+		}
+	}()
 
 	redisStore, err := store.New(cfg.Redis)
 	if err != nil {
@@ -61,12 +80,18 @@ func main() {
 
 	auth := authmw.New(cfg.Auth.APIKeys)
 
+	tlsConfig, err := tlsutil.Build(cfg.Server.TLS)
+	if err != nil {
+		log.Error("build tls config", "err", err)
+		os.Exit(1)
+	}
+
 	stopRefresh := startRuleRefreshLoop(registry, log, 5*time.Second)
 	defer stopRefresh()
 
-	grpcSrv := newGRPCServer(engine, registry, auth)
-	httpSrv := newHTTPServer(engine, cfg.Server.HTTPAddr, auth)
-	adminHTTPSrv := newAdminHTTPServer(registry, cfg.Server.AdminAddr, auth)
+	grpcSrv := newGRPCServer(engine, registry, auth, tlsConfig)
+	httpSrv := newHTTPServer(engine, cfg.Server.HTTPAddr, auth, tlsConfig)
+	adminHTTPSrv := newAdminHTTPServer(registry, cfg.Server.AdminAddr, auth, tlsConfig)
 	metricsSrv := newMetricsServer(cfg.Server.MetricsAddr)
 
 	grpcLis, err := net.Listen("tcp", cfg.Server.GRPCAddr)
@@ -87,6 +112,7 @@ func main() {
 		"admin_addr", cfg.Server.AdminAddr,
 		"metrics_addr", cfg.Server.MetricsAddr,
 		"rules", len(cfg.Rules),
+		"tls_enabled", tlsConfig != nil,
 	)
 
 	sigCh := make(chan os.Signal, 1)
@@ -108,30 +134,39 @@ func main() {
 	_ = metricsSrv.Shutdown(shutdownCtx)
 }
 
-func newGRPCServer(engine *ruleengine.Engine, registry *ruleengine.Registry, auth *authmw.Authenticator) *grpc.Server {
-	srv := grpc.NewServer(grpc.UnaryInterceptor(auth.UnaryServerInterceptor()))
+func newGRPCServer(engine *ruleengine.Engine, registry *ruleengine.Registry, auth *authmw.Authenticator, tlsConfig *tls.Config) *grpc.Server {
+	opts := []grpc.ServerOption{
+		grpc.UnaryInterceptor(auth.UnaryServerInterceptor()),
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+	}
+	if tlsConfig != nil {
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	}
+	srv := grpc.NewServer(opts...)
 	ratelimitv1.RegisterRateLimitServiceServer(srv, grpcserver.New(engine))
 	ratelimitv1.RegisterAdminServiceServer(srv, adminserver.NewGRPCServer(registry))
 	return srv
 }
 
-func newHTTPServer(engine *ruleengine.Engine, addr string, auth *authmw.Authenticator) *http.Server {
-	handler := httpserver.New(engine)
+func newHTTPServer(engine *ruleengine.Engine, addr string, auth *authmw.Authenticator, tlsConfig *tls.Config) *http.Server {
+	handler := otelhttp.NewHandler(auth.HTTPMiddleware(httpserver.New(engine)), "unigate.check_http")
 	return &http.Server{
 		Addr:         addr,
-		Handler:      auth.HTTPMiddleware(handler),
+		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
+		TLSConfig:    tlsConfig,
 	}
 }
 
-func newAdminHTTPServer(registry *ruleengine.Registry, addr string, auth *authmw.Authenticator) *http.Server {
-	handler := adminserver.NewHTTPServer(registry)
+func newAdminHTTPServer(registry *ruleengine.Registry, addr string, auth *authmw.Authenticator, tlsConfig *tls.Config) *http.Server {
+	handler := otelhttp.NewHandler(auth.HTTPMiddleware(adminserver.NewHTTPServer(registry)), "unigate.admin_http")
 	return &http.Server{
 		Addr:         addr,
-		Handler:      auth.HTTPMiddleware(handler),
+		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
+		TLSConfig:    tlsConfig,
 	}
 }
 
@@ -141,8 +176,16 @@ func newMetricsServer(addr string) *http.Server {
 	return &http.Server{Addr: addr, Handler: mux}
 }
 
+// runOrIgnoreClose serves srv, using TLS when srv.TLSConfig has been
+// set (certificates already loaded into it, so both file arguments to
+// ListenAndServeTLS are empty - see net/http's docs on that).
 func runOrIgnoreClose(srv *http.Server) error {
-	err := srv.ListenAndServe()
+	var err error
+	if srv.TLSConfig != nil {
+		err = srv.ListenAndServeTLS("", "")
+	} else {
+		err = srv.ListenAndServe()
+	}
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}

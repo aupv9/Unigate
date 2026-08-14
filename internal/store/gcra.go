@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 type GCRASpec struct {
@@ -23,6 +26,11 @@ type GCRAResult struct {
 // GCRA only ever models one rate (it doesn't stack multiple windows the way
 // the sliding-window algorithm does), matching FR4's "choose per rule" split.
 func (s *Store) CheckGCRA(ctx context.Context, namespace, ruleID, identity string, cost int64, spec GCRASpec, now time.Time) (*GCRAResult, error) {
+	ctx, span := tracer.Start(ctx, "redis.gcra", oteltrace.WithAttributes(
+		attribute.String("unigate.rule_id", ruleID),
+	))
+	defer span.End()
+
 	if spec.Limit <= 0 {
 		return nil, fmt.Errorf("gcra spec requires limit > 0")
 	}

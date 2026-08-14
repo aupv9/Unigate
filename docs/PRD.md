@@ -149,15 +149,17 @@ staged) plus a first cut of Phase 2-4 items:
 | FR5 (progressive lockout) | `internal/store/lockout.lua`, `internal/ruleengine/engine.go` |
 | FR6 (gateway adapters) | `adapters/kong`, `adapters/apisix`, `adapters/apigee` |
 | FR7 (standard headers) | `internal/api/httpserver`, adapter code |
-| FR8 (admin API) | `internal/api/adminserver`, `internal/ruleengine/registry.go` |
+| FR8 (admin API) | `internal/api/adminserver`, `internal/ruleengine/registry.go` (rule CRUD + versioning/rollback, `GET/POST /v1/admin/rules/{id}/versions`\|`/rollback`) |
 | FR9 (audit log/metrics) | `internal/audit`, `internal/metrics` |
 | FR10 (fail-open/closed) | `internal/ruleengine/engine.go` (per-rule `fail_mode`) |
 | NFR4 (atomic ops) | Redis Lua scripts in `internal/store/*.lua` |
-| NFR5 (adapter auth) | `internal/api/authmw`; secrets kept out of config via `internal/config/envexpand.go` (`${VAR}`/`${VAR:-default}`) + `.env.example` |
+| NFR5 (adapter auth) | `internal/api/authmw`; secrets kept out of config via `internal/config/envexpand.go` (`${VAR}`/`${VAR:-default}`) + `.env.example`; native mTLS in `internal/tlsutil` (`server.tls` config block) |
 | NFR7 (namespacing) | `config.RuleConfig.Namespace`, `internal/store` key hashing |
 | G6 / FR9 (security team dashboard + alerting) | `deploy/observability/` (Prometheus + Grafana, `docker-compose.observability.yaml`), `docs/RUNBOOK.md` |
-| NFR2/NFR3 (availability, horizontal scaling) | `deploy/helm/unigate` (HPA, PodDisruptionBudget) |
+| NFR2/NFR3 (availability, horizontal scaling) | `deploy/helm/unigate` (HPA, PodDisruptionBudget); `internal/store/cluster_test.go` validates against a real 3-master Redis Cluster |
 | (docs) HTTP API reference | `api/openapi.yaml`, linted in CI |
 | (ops) On-call runbook | `docs/RUNBOOK.md` |
+| NFR1 (added latency) | `cmd/loadtest` + `docs/LOAD_TEST.md` |
+| (ops) Distributed tracing | `internal/tracing`, spans in `internal/ruleengine`/`internal/store`, `otelgrpc`/`otelhttp` in `cmd/server/main.go` |
 
 See the top-level `README.md` for how to run and test this locally.

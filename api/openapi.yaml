@@ -251,6 +251,77 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /v1/admin/rules/{id}/versions:
+    servers:
+      - url: http://localhost:8081
+        description: Admin HTTP API (server.admin_addr in config.yaml)
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [admin]
+      summary: List a rule's past versions (most recent first, capped at 10; does not include the current version)
+      operationId: listRuleVersions
+      responses:
+        "200":
+          description: Version history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RuleVersion" }
+        "404":
+          description: Rule not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/admin/rules/{id}/rollback:
+    servers:
+      - url: http://localhost:8081
+        description: Admin HTTP API (server.admin_addr in config.yaml)
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [admin]
+      summary: Roll back to a previous version
+      description: |
+        Reapplies a historical version's content as a brand-new
+        version (like `git revert`, not a destructive rewind) - the
+        version history stays a complete, forward-only audit trail.
+      operationId: rollbackRule
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: integer
+                  description: Version to roll back to. Omit or 0 to roll back to the immediately preceding version.
+      responses:
+        "200":
+          description: The rule after rollback (now at a new, higher version number)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rule" }
+        "404":
+          description: Rule not found, or the requested version doesn't exist in history
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Rule has no history to roll back to (never updated since creation)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
 components:
   securitySchemes:
     GatewayHeader:
@@ -402,6 +473,18 @@ components:
           type: string
           description: Duration string; how long a violation stays "consecutive" (see Window.period)
           example: 1h
+
+    RuleVersion:
+      type: object
+      description: One historical snapshot of a rule, used for rollback
+      properties:
+        version:
+          type: integer
+        rule:
+          $ref: "#/components/schemas/Rule"
+        updated_at:
+          type: string
+          format: date-time
 
     Rule:
       type: object

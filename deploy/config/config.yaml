@@ -6,6 +6,28 @@ server:
   http_addr: ":8080"
   admin_addr: ":8081"
   metrics_addr: ":9100"
+  # mTLS for adapter<->service transport (NFR5), applied uniformly to
+  # grpc/http/admin (not metrics - Prometheus scraping is assumed to
+  # stay on the internal network). Disabled by default: this fits a
+  # deployment where TLS is instead terminated by a service
+  # mesh/sidecar in front of these listeners. To enable:
+  #   tls:
+  #     enabled: true
+  #     cert_file: /etc/unigate/tls/server.crt
+  #     key_file: /etc/unigate/tls/server.key
+  #     require_client_cert: true   # false = server-side TLS only
+  #     client_ca_file: /etc/unigate/tls/ca.crt
+
+# OpenTelemetry distributed tracing across the CheckLimit path (gRPC/
+# HTTP request -> rule engine -> Redis Lua calls), exported via
+# OTLP/HTTP. Disabled by default - requires an OTLP collector
+# (OpenTelemetry Collector, Jaeger, Tempo, ...) to actually be running
+# at otlp_endpoint.
+tracing:
+  enabled: false
+  otlp_endpoint: "otel-collector:4318"
+  service_name: "unigate"
+  sample_ratio: 1.0
 
 redis:
   addrs:

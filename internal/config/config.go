@@ -11,17 +11,55 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Redis  RedisConfig  `yaml:"redis"`
-	Rules  []RuleConfig `yaml:"rules"`
-	Auth   AuthConfig   `yaml:"auth"`
+	Server  ServerConfig  `yaml:"server"`
+	Redis   RedisConfig   `yaml:"redis"`
+	Rules   []RuleConfig  `yaml:"rules"`
+	Auth    AuthConfig    `yaml:"auth"`
+	Tracing TracingConfig `yaml:"tracing"`
+}
+
+// TracingConfig configures OpenTelemetry distributed tracing across
+// the CheckLimit path (gRPC/HTTP request -> rule engine -> Redis Lua
+// calls), exported via OTLP/HTTP. Disabled by default - tracing adds
+// per-request overhead and an external collector dependency that
+// shouldn't be assumed present.
+type TracingConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// OTLPEndpoint is host:port of an OTLP/HTTP collector (e.g. an
+	// OpenTelemetry Collector or Jaeger's OTLP receiver), without a
+	// scheme - e.g. "otel-collector:4318".
+	OTLPEndpoint string `yaml:"otlp_endpoint"`
+	ServiceName  string `yaml:"service_name"`
+	// SampleRatio is the fraction of traces to record (0.0-1.0).
+	// Defaults to 1.0 (sample everything) if unset AND Enabled is
+	// true, since an explicit zero value is indistinguishable from
+	// "unset" in YAML - set it explicitly to reduce sampling.
+	SampleRatio float64 `yaml:"sample_ratio"`
 }
 
 type ServerConfig struct {
-	GRPCAddr    string `yaml:"grpc_addr"`
-	HTTPAddr    string `yaml:"http_addr"`
-	AdminAddr   string `yaml:"admin_addr"`
-	MetricsAddr string `yaml:"metrics_addr"`
+	GRPCAddr    string    `yaml:"grpc_addr"`
+	HTTPAddr    string    `yaml:"http_addr"`
+	AdminAddr   string    `yaml:"admin_addr"`
+	MetricsAddr string    `yaml:"metrics_addr"`
+	TLS         TLSConfig `yaml:"tls"`
+}
+
+// TLSConfig configures native TLS/mTLS for the gRPC, CheckLimit HTTP,
+// and Admin HTTP listeners (NFR5). Applies uniformly to all three -
+// they're behind the same adapter<->service trust boundary. Disabled
+// by default, matching a deployment where TLS is instead terminated
+// by a service mesh/sidecar in front of the listeners; the API-key
+// auth in AuthConfig works independently of whether this is enabled.
+type TLSConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+	// RequireClientCert turns this into mutual TLS: ClientCAFile must
+	// then be set, and every connection must present a certificate
+	// signed by it. When false, this is server-side TLS only.
+	RequireClientCert bool   `yaml:"require_client_cert"`
+	ClientCAFile      string `yaml:"client_ca_file"`
 }
 
 type RedisConfig struct {
@@ -128,6 +166,12 @@ func (c *Config) applyDefaults() {
 	if c.Redis.WriteTimeout == 0 {
 		c.Redis.WriteTimeout = Duration(200 * time.Millisecond)
 	}
+	if c.Tracing.ServiceName == "" {
+		c.Tracing.ServiceName = "unigate"
+	}
+	if c.Tracing.SampleRatio == 0 {
+		c.Tracing.SampleRatio = 1.0
+	}
 	for i := range c.Rules {
 		r := &c.Rules[i]
 		if r.Algorithm == "" {
@@ -146,6 +190,22 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
+	if c.Server.TLS.Enabled {
+		if c.Server.TLS.CertFile == "" || c.Server.TLS.KeyFile == "" {
+			return fmt.Errorf("server.tls: cert_file and key_file are required when enabled")
+		}
+		if c.Server.TLS.RequireClientCert && c.Server.TLS.ClientCAFile == "" {
+			return fmt.Errorf("server.tls: client_ca_file is required when require_client_cert is true")
+		}
+	}
+
+	if c.Tracing.Enabled && c.Tracing.OTLPEndpoint == "" {
+		return fmt.Errorf("tracing.otlp_endpoint is required when enabled")
+	}
+	if c.Tracing.SampleRatio < 0 || c.Tracing.SampleRatio > 1 {
+		return fmt.Errorf("tracing.sample_ratio must be between 0 and 1, got %v", c.Tracing.SampleRatio)
+	}
+
 	seen := map[string]bool{}
 	for _, r := range c.Rules {
 		if r.ID == "" {
