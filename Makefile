@@ -18,6 +18,9 @@ fmt:
 
 # Regenerate Go code from proto/ratelimit/v1/ratelimit.proto.
 # Requires: protoc, protoc-gen-go, protoc-gen-go-grpc on PATH.
+# CI pins protoc-gen-go@v1.36.11 / protoc-gen-go-grpc@v1.6.2 - install
+# the same versions locally (`go install .../protoc-gen-go@v1.36.11`)
+# so regenerating doesn't produce a version-string-only diff.
 proto:
 	protoc -I proto \
 		--go_out=gen/go --go_opt=paths=source_relative \
